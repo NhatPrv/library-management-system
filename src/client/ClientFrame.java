@@ -4,25 +4,23 @@ import javax.swing.*;
 import java.awt.*;
 import java.io.*;
 import java.net.Socket;
-import java.util.ArrayList;
-import java.util.List;
 
 public class ClientFrame extends JFrame {
-    private final JTextField txtId = new JTextField();       // chỉ hiển thị
+    private final BookTableModel model = new BookTableModel();
+    private final JTable table = new JTable(model);
+
+    private final JTextField txtId = new JTextField();  
     private final JTextField txtTitle = new JTextField();
     private final JTextField txtAuthor = new JTextField();
     private final JTextField txtYear = new JTextField();
-
-    private final BookTableModel model = new BookTableModel();
-    private final JTable table = new JTable(model);
 
     private ObjectOutputStream out;
     private ObjectInputStream in;
 
     public ClientFrame() {
-        setTitle("Library Client");
+        setTitle("Library Client (Realtime)");
         setDefaultCloseOperation(EXIT_ON_CLOSE);
-        setSize(800,500);
+        setSize(800, 500);
         setLocationRelativeTo(null);
         setLayout(new BorderLayout(8,8));
 
@@ -30,7 +28,7 @@ public class ClientFrame extends JFrame {
         add(new JScrollPane(table), BorderLayout.CENTER);
 
         // Form
-        JPanel form = new JPanel(new GridLayout(1,8,6,6));
+        JPanel form = new JPanel(new GridLayout(1, 8, 6, 6));
         txtId.setEditable(false);
         form.add(new JLabel("ID"));    form.add(txtId);
         form.add(new JLabel("Title")); form.add(txtTitle);
@@ -47,7 +45,7 @@ public class ClientFrame extends JFrame {
         actions.add(btnAdd); actions.add(btnUpdate); actions.add(btnDelete); actions.add(btnClear);
         add(actions, BorderLayout.SOUTH);
 
-        // Row click → load form
+        // Row click → load to form
         table.getSelectionModel().addListSelectionListener(e -> {
             int r = table.getSelectedRow();
             Book b = model.getAt(r);
@@ -59,10 +57,9 @@ public class ClientFrame extends JFrame {
             }
         });
 
-        // Actions
-        btnAdd.addActionListener(e -> sendAdd());
-        btnUpdate.addActionListener(e -> sendUpdate());
-        btnDelete.addActionListener(e -> sendDelete());
+        btnAdd.addActionListener(e -> doAdd());
+        btnUpdate.addActionListener(e -> doUpdate());
+        btnDelete.addActionListener(e -> doDelete());
         btnClear.addActionListener(e -> { txtId.setText(""); txtTitle.setText(""); txtAuthor.setText(""); txtYear.setText(""); });
 
         connect("127.0.0.1", 5555);
@@ -80,26 +77,32 @@ public class ClientFrame extends JFrame {
         }
     }
 
-    private void sendAdd(){
+    private void doAdd(){
         try {
-            Book b = new Book(0, txtTitle.getText().trim(), txtAuthor.getText().trim(), Integer.parseInt(txtYear.getText().trim()));
-            out.writeObject(Message.add(b)); out.flush();
-        } catch (Exception ex){ showErr(ex.getMessage()); }
+            String title = txtTitle.getText().trim();
+            String author = txtAuthor.getText().trim();
+            int year = Integer.parseInt(txtYear.getText().trim());
+            out.writeObject(Message.add(new Book(0, title, author, year)));
+            out.flush();
+        } catch (Exception ex){ showErr("Dữ liệu không hợp lệ"); }
     }
 
-    private void sendUpdate(){
+    private void doUpdate(){
         try {
             int id = Integer.parseInt(txtId.getText().trim());
-            Book b = new Book(id, txtTitle.getText().trim(), txtAuthor.getText().trim(), Integer.parseInt(txtYear.getText().trim()));
-            out.writeObject(Message.update(b)); out.flush();
+            String title = txtTitle.getText().trim();
+            String author = txtAuthor.getText().trim();
+            int year = Integer.parseInt(txtYear.getText().trim());
+            out.writeObject(Message.update(new Book(id, title, author, year)));
+            out.flush();
         } catch (Exception ex){ showErr("Chọn dòng để sửa"); }
     }
 
-    private void sendDelete(){
+    private void doDelete(){
         try {
             int id = Integer.parseInt(txtId.getText().trim());
-            Book b = new Book(id, "", "", 0);
-            out.writeObject(Message.delete(b)); out.flush();
+            out.writeObject(Message.delete(new Book(id, "", "", 0)));
+            out.flush();
         } catch (Exception ex){ showErr("Chọn dòng để xóa"); }
     }
 
@@ -112,35 +115,14 @@ public class ClientFrame extends JFrame {
                     Object obj = in.readObject();
                     if(!(obj instanceof Message m)) break;
                     switch (m.getType()){
-                        case INIT, LIST -> SwingUtilities.invokeLater(() -> model.setData(m.getBooks()));
-                        case ADD -> {
-                            // lấy danh sách hiện tại + thêm item (cho mượt); hoặc yêu cầu server gửi LIST
-                            List<Book> cur = new ArrayList<>();
-                            for(int i=0;i<model.getRowCount();i++) cur.add(model.getAt(i));
-                            cur.add(m.getBook());
-                            SwingUtilities.invokeLater(() -> model.setData(cur));
-                        }
-                        case UPDATE -> {
-                            List<Book> cur = new ArrayList<>();
-                            for(int i=0;i<model.getRowCount();i++){
-                                Book x = model.getAt(i);
-                                if(x.getId()==m.getBook().getId()) x = m.getBook();
-                                cur.add(x);
-                            }
-                            SwingUtilities.invokeLater(() -> model.setData(cur));
-                        }
-                        case DELETE -> {
-                            List<Book> cur = new ArrayList<>();
-                            for(int i=0;i<model.getRowCount();i++){
-                                Book x = model.getAt(i);
-                                if(x.getId()!=m.getBook().getId()) cur.add(x);
-                            }
-                            SwingUtilities.invokeLater(() -> model.setData(cur));
-                        }
-                        case ERROR -> showErr(m.getError());
+                        case INIT   -> SwingUtilities.invokeLater(() -> model.setAll(m.getBooks()));
+                        case ADD    -> SwingUtilities.invokeLater(() -> model.upsert(m.getBook()));
+                        case UPDATE -> SwingUtilities.invokeLater(() -> model.upsert(m.getBook()));
+                        case DELETE -> SwingUtilities.invokeLater(() -> model.removeById(m.getBook().getId()));
+                        case ERROR  -> showErr(m.getError());
                     }
                 }
-            } catch (Exception ignored) { }
+            } catch (Exception ignored) {}
         }
     }
 

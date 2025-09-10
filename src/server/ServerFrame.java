@@ -1,25 +1,35 @@
+package server;
+
 import common.BookTableModel;
 import javax.swing.*;
 import java.awt.*;
 
 public class ServerFrame extends JFrame {
-    private final LibraryServer server;
+    private final LibraryServer server = new LibraryServer();
     private final BookTableModel model = new BookTableModel();
-    private final JTable table = new JTable(model);
 
     public ServerFrame() {
-        setTitle("Library Server");
+        setTitle("Library Server (Realtime)");
         setDefaultCloseOperation(EXIT_ON_CLOSE);
-        setSize(600,400);
+        setSize(700, 450);
         setLocationRelativeTo(null);
         setLayout(new BorderLayout(8,8));
-        add(new JScrollPane(table), BorderLayout.CENTER);
+        add(new JScrollPane(new JTable(model)), BorderLayout.CENTER);
 
-        server = new LibraryServer(5555);
-        server.start();
+        // Lần đầu hiển thị
+        model.setAll(server.getAll());
 
-        // Cập nhật bảng server mỗi 2 giây (đơn giản)
-        new Timer(2000, e -> model.setData(server.getAll())).start();
+        // Lắng nghe sự kiện từ server (push)
+        server.addListener(m -> SwingUtilities.invokeLater(() -> {
+            switch (m.getType()){
+                case ADD    -> model.upsert(m.getBook());
+                case UPDATE -> model.upsert(m.getBook());
+                case DELETE -> model.removeById(m.getBook().getId());
+                default -> {}
+            }
+        }));
+
+        try { server.startAcceptLoop(5555); } catch (Exception e) { e.printStackTrace(); }
     }
 
     public static void main(String[] args) {
